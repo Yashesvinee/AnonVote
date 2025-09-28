@@ -1,28 +1,76 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import dotenv from 'dotenv';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { body, validationResult } from 'express-validator';
+import jwt from 'jsonwebtoken';
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Local development configuration
+// Configuration from environment variables
 const CONFIG = {
-  // Local proof server
-  proofServerUrl: 'http://localhost:6300',
-  
-  // Mock contract address for local development
-  contractAddress: '0x1234567890123456789012345678901234567890',
-  
-  // Local development RPC
-  rpcUrl: 'http://localhost:8545',
-  
-  // Local circuit identifier
-  circuitId: 'voting_local_v1'
+  proofServerUrl: process.env.PROOF_SERVER_URL || 'http://localhost:6300',
+  contractAddress: process.env.CONTRACT_ADDRESS || '0x1234567890123456789012345678901234567890',
+  rpcUrl: process.env.MIDNIGHT_RPC_URL || 'http://localhost:8545',
+  circuitId: process.env.CIRCUIT_ID || 'voting_local_v1',
+  clientUrl: process.env.CLIENT_URL || 'http://localhost:3002',
+  jwtSecret: process.env.JWT_SECRET || 'dev-secret-key-change-for-production',
+  magicLinkExpiry: parseInt(process.env.MAGIC_LINK_EXPIRY) || 15 * 60 * 1000,
+  sessionExpiry: parseInt(process.env.SESSION_EXPIRY) || 24 * 60 * 60 * 1000
 };
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"]
+    }
+  }
+}));
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? [CONFIG.clientUrl] 
+    : ['http://localhost:3002', 'http://localhost:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Rate limiting
+const generalLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 requests per windowMs for auth endpoints
+  message: 'Too many authentication attempts, please try again later.',
+  skipSuccessfulRequests: true
+});
+
+const voteLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: parseInt(process.env.VOTE_RATE_LIMIT_MAX) || 10,
+  message: 'Too many vote attempts, please try again later.'
+});
+
+app.use(generalLimiter);
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // In-memory storage for local development
 let votes = [];
@@ -94,12 +142,101 @@ app.get('/api/health', (req, res) => {
 // PASSWORDLESS AUTHENTICATION ENDPOINTS
 // ========================================
 
+// JWT utility functions
+const generateJWT = (payload) => {
+  return jwt.sign(payload, CONFIG.jwtSecret, { 
+    expiresIn: '24h',
+    issuer: 'anonvote-server',
+    audience: 'anonvote-client'
+  });
+};
+
+const verifyJWT = (token) => {
+  try {
+    return jwt.verify(token, CONFIG.jwtSecret, {
+      issuer: 'anonvote-server',
+      audience: 'anonvote-client'
+    });
+  } catch (error) {
+    return null;
+  }
+};
+
+// Enhanced error logging
+const logError = (error, context = '') => {
+  const timestamp = new Date().toISOString();
+  console.error(`[${timestamp}] ERROR ${context}:`, error.message);
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Stack:', error.stack);
+  }
+};
+
+const logInfo = (message, data = {}) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] INFO: ${message}`, data);
+};
+
 // In-memory storage for magic links and users
 const magicLinkTokens = new Map(); // token -> { userId, email, expiresAt }
 const authUsers = loadUsers(); // userId -> { userId, email, authenticatedAt, ageVerified }
 
+// Input validation middleware
+const validateEmail = [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email address'),
+];
+
+const validateMagicLink = [
+  body('token')
+    .isLength({ min: 32, max: 128 })
+    .isAlphanumeric()
+    .withMessage('Invalid token format'),
+];
+
+const validateAge = [
+  body('userId')
+    .isUUID()
+    .withMessage('Invalid user ID'),
+  body('dateOfBirth')
+    .isISO8601()
+    .withMessage('Invalid date format'),
+];
+
+const validatePoll = [
+  body('title')
+    .trim()
+    .isLength({ min: 3, max: 200 })
+    .withMessage('Title must be between 3 and 200 characters'),
+  body('description')
+    .trim()
+    .isLength({ min: 10, max: 1000 })
+    .withMessage('Description must be between 10 and 1000 characters'),
+  body('options')
+    .isArray({ min: 2, max: 10 })
+    .withMessage('Must provide between 2 and 10 options'),
+  body('options.*')
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Each option must be between 1 and 100 characters'),
+];
+
+// Handle validation errors
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      details: errors.array()
+    });
+  }
+  next();
+};
+
 // Send magic link
-app.post('/api/auth/send-magic-link', (req, res) => {
+app.post('/api/auth/send-magic-link', authLimiter, validateEmail, handleValidationErrors, (req, res) => {
   const { email } = req.body;
   
   if (!email || !email.includes('@')) {
@@ -109,29 +246,38 @@ app.post('/api/auth/send-magic-link', (req, res) => {
   try {
     const userId = crypto.randomUUID();
     const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
+    const expiresAt = Date.now() + CONFIG.magicLinkExpiry;
     
     // Store the magic link token
     magicLinkTokens.set(token, { userId, email, expiresAt });
     
     // In a real app, you'd send an email here
-    console.log(`🔗 Magic link for ${email}: http://localhost:3002?token=${token}`);
+    logInfo(`Magic link generated for ${email}`, { userId: userId.substring(0, 8) });
     
-    res.json({ 
+    const response = { 
       success: true, 
       message: 'Magic link sent to your email!',
-      // For demo purposes, return the token (remove in production)
-      token: token
-    });
+    };
+    
+    // For demo purposes, return the token (remove in production)
+    if (process.env.NODE_ENV === 'development') {
+      response.token = token;
+      response.debugUrl = `${CONFIG.clientUrl}?token=${token}`;
+    }
+    
+    res.json(response);
     
   } catch (error) {
-    console.error('Error generating magic link:', error);
-    res.status(500).json({ error: 'Failed to send magic link' });
+    logError(error, 'Magic link generation');
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to send magic link' 
+    });
   }
 });
 
 // Verify magic link
-app.post('/api/auth/verify-magic-link', (req, res) => {
+app.post('/api/auth/verify-magic-link', authLimiter, validateMagicLink, handleValidationErrors, (req, res) => {
   const { token } = req.body;
   
   if (!token) {
@@ -183,7 +329,7 @@ app.post('/api/auth/verify-magic-link', (req, res) => {
 });
 
 // Verify age
-app.post('/api/auth/verify-age', (req, res) => {
+app.post('/api/auth/verify-age', authLimiter, validateAge, handleValidationErrors, (req, res) => {
   const { userId, dateOfBirth } = req.body;
   
   if (!userId || !dateOfBirth) {
@@ -236,27 +382,23 @@ app.post('/api/auth/verify-age', (req, res) => {
   }
 });
 
-// Debug endpoint to check nullifiers (for testing only)
-app.get('/api/debug/nullifiers', (req, res) => {
-  res.json({ 
-    totalNullifiers: nullifiers.size,
-    nullifierList: Array.from(nullifiers).map(n => n.substring(0, 16) + '...'),
-    message: 'Each nullifier represents one vote cast'
+// Debug endpoints (only available in development)
+if (process.env.NODE_ENV !== 'production') {
+  // Debug endpoint to check nullifiers (for testing only)
+  app.get('/api/debug/nullifiers', (req, res) => {
+    res.json({
+      count: nullifiers.size,
+      nullifiers: Array.from(nullifiers).slice(0, 10) // Show only first 10 for brevity
+    });
   });
-});
 
-// Debug endpoint to clear nullifiers (for testing only)
-app.delete('/api/debug/nullifiers', (req, res) => {
-  const previousCount = nullifiers.size;
-  nullifiers.clear();
-  saveNullifiers(); // Clear the file too
-  console.log('🗑️ NULLIFIERS CLEARED for testing - Previous count:', previousCount);
-  res.json({ 
-    message: 'All nullifiers cleared for testing',
-    previousCount,
-    currentCount: nullifiers.size
+  // Debug endpoint to clear nullifiers (for testing only)
+  app.delete('/api/debug/nullifiers', (req, res) => {
+    nullifiers.clear();
+    saveNullifiers();
+    res.json({ success: true, message: 'All nullifiers cleared' });
   });
-});
+}
 
 // Check if wallet has already verified age eligibility
 app.get('/api/check-age-status/:address', (req, res) => {
@@ -382,7 +524,7 @@ app.get('/api/polls', (req, res) => {
 });
 
 // Create a new poll
-app.post('/api/polls', (req, res) => {
+app.post('/api/polls', validatePoll, handleValidationErrors, (req, res) => {
   const { title, options, description } = req.body;
   
   const poll = {
