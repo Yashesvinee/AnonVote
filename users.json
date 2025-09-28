@@ -1,0 +1,50 @@
+{
+  "76300ec4-a492-470a-b809-9524b824a17b": {
+    "userId": "76300ec4-a492-470a-b809-9524b824a17b",
+    "email": "yashesvineev@gmail.com",
+    "authenticatedAt": 1759078708319,
+    "ageVerified": true,
+    "dateOfBirth": "2001-07-30"
+  },
+  "d3f8f91f-b715-4dbd-a3ea-5619e414bb42": {
+    "userId": "d3f8f91f-b715-4dbd-a3ea-5619e414bb42",
+    "email": "yashesvineev@gmail.com",
+    "authenticatedAt": 1759079530470,
+    "ageVerified": true,
+    "dateOfBirth": "2001-12-12"
+  },
+  "3ad6bab1-9a9f-4e8a-ba06-ceaac6f52c0d": {
+    "userId": "3ad6bab1-9a9f-4e8a-ba06-ceaac6f52c0d",
+    "email": "yashesvineev@gmail.com",
+    "authenticatedAt": 1759079589680,
+    "ageVerified": false
+  },
+  "98c9df09-969d-43bf-8c82-3cd47c76a7db": {
+    "userId": "98c9df09-969d-43bf-8c82-3cd47c76a7db",
+    "email": "yashes@gmail.com",
+    "authenticatedAt": 1759081357387,
+    "ageVerified": true,
+    "dateOfBirth": "2001-01-30"
+  },
+  "3dbd0cc8-1f24-4f84-b482-4e9cedbbcbab": {
+    "userId": "3dbd0cc8-1f24-4f84-b482-4e9cedbbcbab",
+    "email": "syntax@gmail.com",
+    "authenticatedAt": 1759081438140,
+    "ageVerified": true,
+    "dateOfBirth": "2003-12-12"
+  },
+  "80c60699-5462-449b-8e6a-a9f696036c34": {
+    "userId": "80c60699-5462-449b-8e6a-a9f696036c34",
+    "email": "yashes@gmail.com",
+    "authenticatedAt": 1759081470493,
+    "ageVerified": true,
+    "dateOfBirth": "2001-12-30"
+  },
+  "4892f219-22e0-4030-abde-e15055c9085b": {
+    "userId": "4892f219-22e0-4030-abde-e15055c9085b",
+    "email": "syntax@gmail.com",
+    "authenticatedAt": 1759081520593,
+    "ageVerified": true,
+    "dateOfBirth": "2001-03-02"
+  }
+}
