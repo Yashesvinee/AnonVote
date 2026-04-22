@@ -15,7 +15,7 @@ export interface AuthSession {
 
 class AuthService {
   private currentUser: AuthUser | null = null;
-  private sessionKey = 'midnight_auth_session';
+  private sessionKey = 'anonvote_auth_session';
 
   // Initialize from localStorage if available
   constructor() {

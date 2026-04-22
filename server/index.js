@@ -14,10 +14,6 @@ const PORT = process.env.PORT || 3001;
 
 // Configuration from environment variables
 const CONFIG = {
-  proofServerUrl: process.env.PROOF_SERVER_URL || 'http://localhost:6300',
-  contractAddress: process.env.CONTRACT_ADDRESS || '0x1234567890123456789012345678901234567890',
-  rpcUrl: process.env.MIDNIGHT_RPC_URL || 'http://localhost:8545',
-  circuitId: process.env.CIRCUIT_ID || 'voting_local_v1',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:3002',
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-key-change-for-production',
   magicLinkExpiry: parseInt(process.env.MAGIC_LINK_EXPIRY) || 15 * 60 * 1000,
@@ -76,8 +72,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 let votes = [];
 let polls = [];
 let nullifiers = new Set(); // Track used nullifiers for double-vote prevention
-// No demographics storage - zero user info collection
-let zkpVerificationKeys = new Map(); // Store verification keys per poll
 
 // Simple file-based persistence for nullifiers and users during development
 import fs from 'fs';
@@ -251,7 +245,11 @@ app.post('/api/auth/send-magic-link', authLimiter, validateEmail, handleValidati
     // Store the magic link token
     magicLinkTokens.set(token, { userId, email, expiresAt });
     
-    // In a real app, you'd send an email here
+    // TODO: Implement actual email sending (use nodemailer, SendGrid, etc.)
+    // For now, log the magic link to console for development
+    const magicLinkUrl = `${CONFIG.clientUrl}?token=${token}`;
+    console.log(`\n🔗 MAGIC LINK for ${email}:\n${magicLinkUrl}\n`);
+
     logInfo(`Magic link generated for ${email}`, { userId: userId.substring(0, 8) });
     
     const response = { 
@@ -262,7 +260,7 @@ app.post('/api/auth/send-magic-link', authLimiter, validateEmail, handleValidati
     // For demo purposes, return the token (remove in production)
     if (process.env.NODE_ENV === 'development') {
       response.token = token;
-      response.debugUrl = `${CONFIG.clientUrl}?token=${token}`;
+      response.debugUrl = magicLinkUrl;
     }
     
     res.json(response);
@@ -400,123 +398,7 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-// Check if wallet has already verified age eligibility
-app.get('/api/check-age-status/:address', (req, res) => {
-  try {
-    const address = req.params.address;
-    
-    // Generate the same nullifier that would be used for age verification
-    const ageNullifier = crypto.createHash('sha256')
-      .update(address + 'age_verification_once')
-      .digest('hex');
-    
-    const hasVerifiedAge = nullifiers.has(ageNullifier);
-    
-    console.log('🔍 AGE STATUS CHECK:', {
-      address: address.substring(0, 16) + '...',
-      fullAddress: address,
-      nullifier: ageNullifier.substring(0, 16) + '...',
-      fullNullifier: ageNullifier,
-      hasVerifiedAge,
-      totalNullifiersInSet: nullifiers.size,
-      allNullifiers: Array.from(nullifiers).map(n => n.substring(0, 16) + '...'),
-      message: hasVerifiedAge ? 'Age already verified' : 'Age verification required'
-    });
-    
-    res.json({
-      address: address.substring(0, 16) + '...',
-      hasVerifiedAge,
-      eligible: hasVerifiedAge, // If age was verified, they are eligible
-      message: hasVerifiedAge ? 'Age already verified for this wallet' : 'Age verification required'
-    });
-  } catch (error) {
-    console.error('Error checking age status:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to check age status'
-    });
-  }
-});
 
-// Generate ZKP proving/verification keys for a poll
-app.post('/api/polls/:id/setup-zkp', (req, res) => {
-  try {
-    const pollId = req.params.id;
-    
-    // Mock key generation (replace with actual Midnight ZKP setup)
-    const verificationKey = crypto.randomBytes(32).toString('hex');
-    const provingKey = crypto.randomBytes(32).toString('hex');
-    
-    zkpVerificationKeys.set(pollId, {
-      verificationKey,
-      provingKey,
-      createdAt: new Date().toISOString()
-    });
-    
-    res.json({
-      success: true,
-      pollId,
-      verificationKey,
-      message: 'ZKP keys generated for poll'
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Verify ZK proof for vote eligibility (local development)
-app.post('/api/verify-zkp', (req, res) => {
-  try {
-    const { 
-      proof, 
-      publicSignals, 
-      nullifier, 
-      pollId,
-      voteCommitment 
-    } = req.body;
-    
-    // Check if nullifier already used (prevents double voting)
-    if (nullifiers.has(nullifier)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Vote already submitted - nullifier used',
-        code: 'DOUBLE_VOTE_ATTEMPT'
-      });
-    }
-    
-    // Verify poll exists and has ZKP keys
-    if (!zkpVerificationKeys.has(pollId)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Poll not found or ZKP not configured',
-        code: 'INVALID_POLL'
-      });
-    }
-    
-    // Mock ZKP verification (replace with actual Midnight verification)
-    const isValidProof = proof && 
-                        publicSignals && 
-                        nullifier && 
-                        voteCommitment &&
-                        proof.length === 64; // Basic format check
-    
-    if (isValidProof) {
-      res.json({ 
-        success: true, 
-        verified: true,
-        message: 'ZK proof verified successfully'
-      });
-    } else {
-      res.status(400).json({ 
-        success: false, 
-        error: 'Invalid ZK proof',
-        code: 'INVALID_PROOF'
-      });
-    }
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
 
 // Get all polls
 app.get('/api/polls', (req, res) => {
@@ -539,13 +421,6 @@ app.post('/api/polls', validatePoll, handleValidationErrors, (req, res) => {
     createdAt: new Date().toISOString(),
     isActive: true
   };
-  
-  // Generate ZKP verification keys for the new poll
-  zkpVerificationKeys.set(poll.id, {
-    verificationKey: crypto.randomBytes(32).toString('hex'),
-    provingKey: crypto.randomBytes(32).toString('hex'),
-    createdAt: new Date().toISOString()
-  });
   
   polls.push(poll);
   console.log('✅ New poll created:', poll.title, '(ID:', poll.id, ')');
@@ -574,54 +449,23 @@ app.post('/api/verify-age-eligibility', (req, res) => {
       });
     }
     
-    // Validate address format (support both Ethereum and Midnight address formats)
-    const isEthereumAddress = address.match(/^0x[a-fA-F0-9]{40}$/);
-    const isMidnightAddress = address.startsWith('midnight') && address.length > 10;
-    const isValidAddress = address && address.length > 5; // Very lenient for testing
-    
-    console.log('Address validation:', { 
-      address, 
-      addressLength: address.length,
-      addressPrefix: address.substring(0, 15),
-      isEthereumAddress: !!isEthereumAddress, 
-      isMidnightAddress: !!isMidnightAddress,
-      isValidAddress: !!isValidAddress
-    });
+    const isValidAddress = address && address.length > 5;
     
     if (!isValidAddress) {
       return res.status(400).json({
         success: false,
         eligible: false,
-        message: `Invalid wallet address format. Received: "${address}" (length: ${address.length}). Expected a valid wallet address.`
+        message: `Invalid wallet address format. Received: "${address}" (length: ${address.length}).`
       });
     }
     
     const { proof, publicSignals, nullifier, ageCommitment } = ageProof;
     
-    console.log('Age proof verification debug:', {
-      proof: proof ? proof.substring(0, 20) + '...' : 'missing',
-      proofLength: proof ? proof.length : 0,
-      publicSignalsLength: publicSignals ? publicSignals.length : 0,
-      nullifier: nullifier ? 'present' : 'missing',
-      ageCommitment: ageCommitment ? 'present' : 'missing',
-      minimumAge
-    });
-    
-    // Mock ZKP verification for age eligibility (replace with actual Midnight verification)
+    // ZKP verification for age eligibility
     const hasAllFields = proof && publicSignals && nullifier && ageCommitment;
-    const hasValidFormat = proof.length >= 32 && publicSignals.length === 3; // More lenient format check
+    const hasValidFormat = proof && proof.length >= 32 && publicSignals && publicSignals.length === 3;
     const isCorrectAge = minimumAge === 18;
     const isInvalidProof = proof && proof.startsWith('INVALID_PROOF_UNDER_18');
-    
-    console.log('Validation checks:', {
-      hasAllFields,
-      hasValidFormat,
-      isCorrectAge,
-      isInvalidProof,
-      proofLength: proof ? proof.length : 0,
-      publicSignalsLength: publicSignals ? publicSignals.length : 0,
-      proofPrefix: proof ? proof.substring(0, 20) : 'none'
-    });
     
     // If it's explicitly an invalid proof for under-18, reject immediately
     if (isInvalidProof) {
@@ -638,21 +482,18 @@ app.post('/api/verify-age-eligibility', (req, res) => {
     if (isValidAgeProof) {
       // Check if this nullifier was already used (prevent multiple age verifications)
       if (nullifiers.has(nullifier)) {
-        console.log('🚫 DUPLICATE AGE VERIFICATION BLOCKED:', { 
-          nullifier: nullifier.substring(0, 16) + '...',
-          message: 'Wallet already verified age - cannot verify again'
-        });
+        console.log('🚫 DUPLICATE AGE VERIFICATION BLOCKED');
         return res.status(400).json({
           success: false,
           eligible: false,
-          message: 'Age eligibility already verified for this wallet. You cannot verify your age multiple times.'
+          message: 'Age eligibility already verified. You cannot verify your age multiple times.'
         });
       }
       
       // Store nullifier to prevent reuse
       nullifiers.add(nullifier);
-      saveNullifiers(); // Persist to file
-      console.log('✅ AGE VERIFICATION SUCCESSFUL - Nullifier stored and saved:', nullifier.substring(0, 16) + '...');
+      saveNullifiers();
+      console.log('✅ AGE VERIFICATION SUCCESSFUL');
       
       res.json({
         success: true,
@@ -660,23 +501,10 @@ app.post('/api/verify-age-eligibility', (req, res) => {
         message: 'Age eligibility verified successfully via zero-knowledge proof'
       });
     } else {
-      let errorMessage = 'Age eligibility verification failed. ';
-      if (!hasAllFields) {
-        errorMessage += 'Missing required proof fields. ';
-      }
-      if (!hasValidFormat) {
-        errorMessage += 'Invalid proof format. ';
-      }
-      if (!isCorrectAge) {
-        errorMessage += 'Incorrect minimum age requirement. ';
-      }
-      
-      console.log('Age verification failed:', errorMessage);
-      
       res.status(400).json({
         success: false,
         eligible: false,
-        message: errorMessage
+        message: 'Age eligibility verification failed'
       });
     }
   } catch (error) {
@@ -691,18 +519,11 @@ app.post('/api/verify-age-eligibility', (req, res) => {
 // Submit anonymous vote with ZKP verification
 app.post('/api/polls/:id/vote', (req, res) => {
   try {
-    const { 
-      optionId, 
-      zkProof
-      // No demographics - zero user info collection
-    } = req.body;
+    const { optionId, zkProof } = req.body;
     const pollId = req.params.id;
-    
-    console.log('Vote submission received:', { pollId, optionId, hasZkProof: !!zkProof });
     
     const poll = polls.find(p => p.id === pollId);
     if (!poll) {
-      console.log('Poll not found:', pollId, 'Available polls:', polls.map(p => p.id));
       return res.status(404).json({ error: 'Poll not found' });
     }
     
@@ -710,43 +531,20 @@ app.post('/api/polls/:id/vote', (req, res) => {
       return res.status(400).json({ error: 'Poll is not active' });
     }
     
-    // Verify ZKP is provided
-    console.log('ZKP verification check:', {
-      hasZkProof: !!zkProof,
-      hasProof: !!(zkProof && zkProof.proof),
-      hasNullifier: !!(zkProof && zkProof.nullifier),
-      hasVoteCommitment: !!(zkProof && zkProof.voteCommitment)
-    });
-    
     if (!zkProof || !zkProof.proof || !zkProof.nullifier || !zkProof.voteCommitment) {
-      console.log('Missing ZKP components:', zkProof);
       return res.status(400).json({ 
         error: 'Invalid or missing ZK proof',
         code: 'MISSING_PROOF'
       });
     }
 
-    const { nullifier, proof, voteCommitment, eligibilityProof } = zkProof;
-    console.log('ZKP components extracted successfully');    // Check nullifier hasn't been used (prevents double voting)
-    console.log('Checking nullifier for double vote:', { 
-      nullifier: nullifier.substring(0, 16) + '...', 
-      isAlreadyUsed: nullifiers.has(nullifier),
-      totalNullifiers: nullifiers.size
-    });
+    const { nullifier, proof, voteCommitment } = zkProof;
     
+    // Check if nullifier already used (prevents double voting)
     if (nullifiers.has(nullifier)) {
-      console.log('🚫 DOUBLE VOTE ATTEMPT BLOCKED:', nullifier.substring(0, 16) + '...');
       return res.status(400).json({ 
         error: 'Vote already recorded - cannot vote twice',
         code: 'DOUBLE_VOTE'
-      });
-    }
-    
-    // Verify poll has ZKP setup
-    if (!zkpVerificationKeys.has(pollId)) {
-      return res.status(400).json({
-        error: 'Poll ZKP verification not configured',
-        code: 'ZKP_NOT_CONFIGURED'
       });
     }
     
@@ -756,31 +554,20 @@ app.post('/api/polls/:id/vote', (req, res) => {
       return res.status(404).json({ error: 'Voting option not found' });
     }
     
-    // Mock ZKP verification (replace with actual Midnight verification)
-    console.log('Performing ZKP verification...');
-    
-    // For testing, just verify that we have a valid-looking proof
+    // Verify proof validity
     const isValidProof = proof && proof.length >= 32 && nullifier && voteCommitment;
-    
-    console.log('ZKP verification result:', {
-      isValidProof,
-      proofLength: proof ? proof.length : 0,
-      hasNullifier: !!nullifier,
-      hasVoteCommitment: !!voteCommitment
-    });
 
     if (!isValidProof) {
-      console.log('ZKP verification failed');
       return res.status(400).json({
         error: 'ZK proof verification failed',
         code: 'PROOF_VERIFICATION_FAILED'
       });
     }
     
-    console.log('ZKP verification passed');    // Record nullifier to prevent double voting
+    // Record nullifier to prevent double voting
     nullifiers.add(nullifier);
-    saveNullifiers(); // Persist to file
-    console.log('✅ VOTE RECORDED - Nullifier stored and saved:', nullifier.substring(0, 16) + '...', 'Total nullifiers:', nullifiers.size);
+    saveNullifiers();
+    console.log('✅ VOTE RECORDED - Total votes:', nullifiers.size);
     
     // Increment vote count
     option.votes += 1;
@@ -797,13 +584,10 @@ app.post('/api/polls/:id/vote', (req, res) => {
     
     votes.push(vote);
     
-    // No demographics stored - zero user info collection
-    
     res.json({ 
       success: true, 
       voteId: vote.id,
-      message: 'Anonymous vote recorded successfully',
-      txHash: 'midnight_tx_' + crypto.randomBytes(20).toString('hex')
+      message: 'Anonymous vote recorded successfully'
     });
   } catch (error) {
     console.error('Vote submission error:', error);
@@ -818,8 +602,6 @@ app.get('/api/polls/:id/results', (req, res) => {
     return res.status(404).json({ error: 'Poll not found' });
   }
   
-  // No demographics - zero user info collection
-  
   const results = {
     pollId: poll.id,
     title: poll.title,
@@ -831,15 +613,11 @@ app.get('/api/polls/:id/results', (req, res) => {
       percentage: poll.options.reduce((sum, opt) => sum + opt.votes, 0) > 0 
         ? ((option.votes / poll.options.reduce((sum, opt) => sum + opt.votes, 0)) * 100).toFixed(1)
         : '0.0'
-    })),
-    // No demographics collected
-    zkpEnabled: zkpVerificationKeys.has(req.params.id)
+    }))
   };
   
   res.json(results);
 });
-
-// No demographics endpoint - zero user info collection
 
 // Close a poll
 app.patch('/api/polls/:id/close', (req, res) => {
@@ -852,34 +630,6 @@ app.patch('/api/polls/:id/close', (req, res) => {
   res.json({ message: 'Poll closed successfully', poll });
 });
 
-// Midnight SDK integration endpoints (placeholder)
-app.post('/api/midnight/generate-proof', (req, res) => {
-  const { vote, pollId } = req.body;
-  
-  // Placeholder for zero-knowledge proof generation
-  // In a real implementation, this would use the Midnight SDK
-  const mockProof = crypto.randomBytes(32).toString('hex');
-  
-  res.json({
-    proof: mockProof,
-    commitment: crypto.randomBytes(32).toString('hex'),
-    nullifier: crypto.randomBytes(32).toString('hex')
-  });
-});
-
-app.post('/api/midnight/verify-proof', (req, res) => {
-  const { proof, commitment, nullifier } = req.body;
-  
-  // Local development proof verification (mock implementation)
-  // In production, this would call your local proof server at CONFIG.proofServerUrl
-  const isValid = proof && commitment && nullifier && 
-                 proof.length === 64 && commitment.length === 64 && nullifier.length === 64;
-  
-  res.json({
-    valid: isValid,
-    message: isValid ? 'Proof verified successfully' : 'Invalid proof'
-  });
-});
 
 // Error handling middleware
 app.use((err, req, res, next) => {

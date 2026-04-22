@@ -46,5 +46,11 @@
     "authenticatedAt": 1759081520593,
     "ageVerified": true,
     "dateOfBirth": "2001-03-02"
+  },
+  "c74bcb02-388e-406b-b77e-c21768418ab8": {
+    "userId": "c74bcb02-388e-406b-b77e-c21768418ab8",
+    "email": "abc@dummy.com",
+    "authenticatedAt": 1769980489239,
+    "ageVerified": false
   }
 }

@@ -7,33 +7,11 @@ export default defineConfig({
   define: {
     global: 'globalThis'
   },
-  resolve: {
-    alias: {
-      buffer: 'buffer',
-      process: 'process/browser',
-      crypto: 'crypto-browserify',
-      stream: 'stream-browserify',
-      util: 'util'
-    }
-  },
   optimizeDeps: {
     include: [
-      'buffer', 
-      'process', 
-      'crypto-js', 
-      'elliptic', 
-      'bn.js',
       'chart.js',
       'react-chartjs-2',
-      'axios',
-      'ethers'
-    ],
-    exclude: [
-      '@midnight-ntwrk/compact-runtime',
-      '@midnight-ntwrk/zswap',
-      '@midnight-ntwrk/midnight-js-network-id',
-      '@midnight-ntwrk/midnight-js-http-client-proof-provider',
-      '@midnight-ntwrk/midnight-js-types'
+      'axios'
     ]
   },
   server: {

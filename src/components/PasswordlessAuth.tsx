@@ -148,7 +148,6 @@ const PasswordlessAuth = ({ onAuthChange, onAgeVerificationChange }: Passwordles
     <div className="passwordless-auth">
       <h2>Privacy Voting Access</h2>
       
-      {/* Debug/Reset button */}
       {(user || step !== 'email') && (
         <button onClick={handleReset} className="reset-button" style={{float: 'right', fontSize: '12px'}}>
           🔄 Reset Session

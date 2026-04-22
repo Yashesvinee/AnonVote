@@ -112,13 +112,15 @@ const PrivacyVoting = () => {
       const voteChoice = parseInt(optionId);
       const randomness = Math.random().toString(16);
       
-      // Mock ZKP generation - Use user ID for consistent nullifier (same user = same nullifier for same poll)
+      // Mock ZKP generation - Use user ID for consistent nullifier
       const nullifier = await crypto.subtle.digest('SHA-256',
         new TextEncoder().encode(userId + pollId + 'vote_nullifier'));
       const voteCommitment = await crypto.subtle.digest('SHA-256',
         new TextEncoder().encode(voteChoice + randomness + userId));
       const eligibilityProof = await crypto.subtle.digest('SHA-256',
-        new TextEncoder().encode(userId + 'eligible' + pollId));      const nullifierHex = Array.from(new Uint8Array(nullifier))
+        new TextEncoder().encode(userId + 'eligible' + pollId));
+      
+      const nullifierHex = Array.from(new Uint8Array(nullifier))
         .map(b => b.toString(16).padStart(2, '0')).join('');
       const commitmentHex = Array.from(new Uint8Array(voteCommitment))
         .map(b => b.toString(16).padStart(2, '0')).join('');
@@ -142,14 +144,11 @@ const PrivacyVoting = () => {
       const voteData = {
         optionId,
         zkProof
-        // No demographics - zero user info sharing
       };
 
       await axios.post(`${API_BASE}/polls/${pollId}/vote`, voteData);
       
       showMessage('✓ Your vote has been recorded anonymously. Your privacy is protected and your vote cannot be linked to your identity.', 'success');
-      
-      // Vote submitted successfully - no user info stored
       
       // Refresh results
       await fetchVoteResults(pollId);
@@ -393,56 +392,52 @@ const PrivacyVoting = () => {
             )}
           </div>
 
-      {/* Active Polls Section */}
-      <div className="polls-section">
-        <h3>Active Polls</h3>
-        {polls.length === 0 ? (
-          <p>No polls available. Create one above!</p>
-        ) : (
-          <div className="polls-grid">
-            {polls.map((poll) => (
-              <div key={poll.id} className="poll-card">
-                <h4>{poll.title}</h4>
-                {poll.description && <p>{poll.description}</p>}
+          {/* Active Polls Section */}
+          <div className="polls-section">
+            <h3>Active Polls</h3>
+            {polls.length === 0 ? (
+              <p>No polls available. Create one above!</p>
+            ) : (
+              <div className="polls-grid">
+                {polls.map((poll) => (
+                  <div key={poll.id} className="poll-card">
+                    <h4>{poll.title}</h4>
+                    {poll.description && <p>{poll.description}</p>}
+                    
+                    <div className="poll-options">
+                      {poll.options.map((option) => (
+                        <button
+                          key={option.id}
+                          onClick={() => submitVote(poll.id, option.id)}
+                          disabled={loading || !poll.isActive || votingPollId === poll.id}
+                          className="vote-option-btn"
+                        >
+                          {votingPollId === poll.id ? '⏳ Processing...' : `${option.text} (${option.votes} votes)`}
+                        </button>
+                      ))}
+                    </div>
                 
-                <div className="poll-options">
-                  {poll.options.map((option) => (
-                    <button
-                      key={option.id}
-                      onClick={() => submitVote(poll.id, option.id)}
-                      disabled={loading || !poll.isActive || votingPollId === poll.id}
-                      className="vote-option-btn"
-                    >
-                      {votingPollId === poll.id ? '⏳ Processing...' : `${option.text} (${option.votes} votes)`}
-                    </button>
-                  ))}
-                </div>
-
-                {/* No demographics collection - Zero user info sharing */}
-
-                <div className="poll-actions">
-                  <button
-                    onClick={() => {
-                      setSelectedPoll(poll);
-                      fetchVoteResults(poll.id);
-                    }}
-                    className="view-results-btn"
-                  >
-                    View Results
-                  </button>
-                  <span className={`poll-status ${poll.isActive ? 'active' : 'closed'}`}>
-                    {poll.isActive ? 'Active' : 'Closed'}
-                  </span>
-                </div>
+                    <div className="poll-actions">
+                      <button
+                        onClick={() => {
+                          setSelectedPoll(poll);
+                          fetchVoteResults(poll.id);
+                        }}
+                        className="view-results-btn"
+                      >
+                        View Results
+                      </button>
+                      <span className={`poll-status ${poll.isActive ? 'active' : 'closed'}`}>
+                        {poll.isActive ? 'Active' : 'Closed'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
-
         </div>
 
-      {/* Results Section */}
       {voteResults && selectedPoll && (
         <div className="results-section">
           <h3>Results: {voteResults.title}</h3>
@@ -460,7 +455,7 @@ const PrivacyVoting = () => {
             </div>
           </div>
         </div>
-      )} {/* Close Results Section */}
+      )}
     </div>
   );
 };
